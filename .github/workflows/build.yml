@@ -1,0 +1,55 @@
+
+name: Build FiveM Client Without Anticheat
+on:
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'
+          fetch-depth: 0
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip setuptools
+          npm install -g yarn
+      - name: Setup MSYS2
+        uses: msys2/setup-msys2@v2
+        with:
+          update: true
+      - name: Remove Adhesive (Anticheat) Component
+        shell: powershell
+        run: |
+          $componentsFile = "data/client/components.json"
+          if (Test-Path $componentsFile) {
+              $json = Get-Content $componentsFile -Raw | ConvertFrom-Json
+              $json = $json | Where-Object { $_ -ne "adhesive" }
+              $json | ConvertTo-Json | Set-Content $componentsFile
+              Write-Host "Removed adhesive from components.json successfully."
+          }
+      - name: Prepare and Generate Build Files
+        shell: cmd
+        run: |
+          python -m citizen.build get-chrome
+          python -m citizen.build prebuild
+          python -m citizen.build gen -game five
+          python -m citizen.build vs -game five
+      - name: Build Solution with MSBuild
+        shell: cmd
+        run: |
+          "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\MSBuild\Current\Bin\MSBuild.exe" citizen.sln /p:Configuration=Release /p:Platform=x64 /m
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: FiveM-Client-NoAnticheat
+          path: code/bin/five/release/
