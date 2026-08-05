@@ -2,14 +2,12 @@ name: Build FiveM Client Without Anticheat
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
-      - master
 
 jobs:
   build:
     runs-on: windows-latest
+    timeout-minutes: 120
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -30,66 +28,86 @@ jobs:
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
 
-      - name: Install dependencies (pip / yarn)
+      - name: Install PowerShell 7
         shell: powershell
+        run: |
+          if (!(Get-Command pwsh -ErrorAction SilentlyContinue)) {
+            winget install --id Microsoft.PowerShell --silent --accept-package-agreements --accept-source-agreements
+          }
+          pwsh --version
+
+      - name: Install dependencies
         run: |
           python -m pip install --upgrade pip setuptools
           npm install -g yarn
-          if (Test-Path 'package.json') {
-            Write-Host "package.json found — installing node deps with yarn..."
-            yarn install --frozen-lockfile || yarn install
-          } else {
-            Write-Host "No package.json found — skipping yarn install."
-          }
 
       - name: Setup MSYS2
         uses: msys2/setup-msys2@v2
         with:
           update: true
+          location: C:\msys64
 
       - name: Remove Adhesive (Anticheat) Component
-        shell: powershell
+        shell: pwsh
         run: |
           $componentsFile = "data/client/components.json"
           if (Test-Path $componentsFile) {
-            try {
-              $raw = Get-Content $componentsFile -Raw
-              $json = $raw | ConvertFrom-Json -ErrorAction Stop
-
-              if ($json -is [System.Collections.IEnumerable]) {
-                # jeśli to tablica
-                $filtered = $json | Where-Object { $_ -ne 'adhesive' }
-                $filtered | ConvertTo-Json -Depth 10 | Set-Content $componentsFile -Encoding UTF8
-                Write-Host "Removed 'adhesive' from components.json (array) successfully."
-              } elseif ($json.PSObject.Properties.Name -contains 'components') {
-                # jeśli to obiekt z polem components
-                $json.components = $json.components | Where-Object { $_ -ne 'adhesive' }
-                $json | ConvertTo-Json -Depth 10 | Set-Content $componentsFile -Encoding UTF8
-                Write-Host "Removed 'adhesive' from components.json.components successfully."
-              } else {
-                Write-Host "components.json has unexpected structure; skipping modification."
-              }
-            } catch {
-              Write-Host "Failed to parse or modify components.json: $_"
-            }
-          } else {
-            Write-Host "components.json not found; skipping."
+              $json = Get-Content $componentsFile -Raw | ConvertFrom-Json
+              $filtered = @($json | Where-Object { $_ -ne "adhesive" })
+              $filtered | ConvertTo-Json | Set-Content $componentsFile
+              Write-Host "Removed adhesive from components.json successfully."
+              Get-Content $componentsFile
           }
 
-      - name: Prepare and Generate Build Files
-        shell: powershell
+      - name: Download Chrome dependencies
+        shell: pwsh
         run: |
           .\fxd.ps1 get-chrome
+
+      - name: Run prebuild
+        shell: pwsh
+        run: |
           .\fxd.ps1 prebuild
+
+      - name: Generate project files
+        shell: pwsh
+        run: |
           .\fxd.ps1 gen -game five
-          .\fxd.ps1 vs -game five
+
+      - name: Find generated solution file
+        id: find_sln
+        shell: pwsh
+        run: |
+          Write-Host "Searching for .sln files..."
+          $slnFiles = Get-ChildItem -Path . -Recurse -Filter "*.sln" -ErrorAction SilentlyContinue
+          foreach ($f in $slnFiles) {
+            Write-Host "Found: $($f.FullName)"
+          }
+          $sln = $slnFiles | Where-Object { $_.Name -match "CitizenMP|citizen" } | Select-Object -First 1
+          if ($sln) {
+            Write-Host "Using solution: $($sln.FullName)"
+            "SLN_PATH=$($sln.FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          } else {
+            Write-Error "No solution file found! Build generation may have failed."
+            exit 1
+          }
+
+      - name: Restore NuGet packages
+        shell: pwsh
+        run: |
+          $slnPath = "${{ steps.find_sln.outputs.SLN_PATH }}"
+          if (!(Test-Path "nuget.exe")) {
+            Invoke-WebRequest -Uri "https://dist.nuget.org/win-x86-commandline/latest/nuget.exe" -OutFile "nuget.exe"
+          }
+          .\nuget.exe restore $slnPath -NonInteractive
 
       - name: Build Solution with MSBuild
         run: |
-          msbuild citizen.sln /restore /p:Configuration=Release /p:Platform=x64 /m
+          msbuild "${{ steps.find_sln.outputs.SLN_PATH }}" /restore /p:Configuration=Release /p:Platform=x64 /m /v:minimal
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: FiveM-Client-NoAnticheat
-          path: code/bin/five/release/**
+          path: code/bin/five/
+          if-no-files-found: warn
