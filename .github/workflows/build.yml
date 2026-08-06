@@ -1,113 +1,61 @@
-name: Build FiveM Client Without Anticheat
+name: Build FiveM Client
 
 on:
-  workflow_dispatch:
+  workflow_dispatch: # Pozwala ręcznie odpalić kompilację w zakładce "Actions"
+  push:
+    branches:
+      - master
+      - main
+    paths-ignore:
+      - '**.md' # Ignoruje zmiany w plikach tekstowych
 
 jobs:
-  build:
-    runs-on: windows-latest
-    timeout-minutes: 120
+  build-client:
+    name: Kompilacja klienta (Windows)
+    runs-on: windows-2022
 
     steps:
-      - name: Checkout repository
+      - name: Konfiguracja Gita dla symlinków
+        # FiveM wymaga symlinków, co jest domyślnie wyłączone w Windowsie
+        run: git config --global core.symlinks true
+
+      - name: Pobieranie kodu repozytorium (Checkout)
         uses: actions/checkout@v4
         with:
-          submodules: 'recursive'
-          fetch-depth: 0
+          submodules: recursive
+          fetch-depth: 1
 
-      - name: Setup Python
+      - name: Konfiguracja Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      - name: Setup Node.js
+      - name: Instalacja setuptools (Wymagane przez skrypty)
+        run: pip install setuptools
+
+      - name: Konfiguracja Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: '20'
 
-      - name: Setup MSBuild
-        uses: microsoft/setup-msbuild@v2
-
-      - name: Install PowerShell 7
-        shell: powershell
+      - name: Budowanie projektu (fxd)
+        # Używamy jednego kroku CMD, aby środowisko poprawnie dziedziczyło zmienne systemowe
+        shell: cmd
         run: |
-          if (!(Get-Command pwsh -ErrorAction SilentlyContinue)) {
-            winget install --id Microsoft.PowerShell --silent --accept-package-agreements --accept-source-agreements
-          }
-          pwsh --version
+          :: Pobranie odpowiedniej wersji Chromium dla FiveM
+          call fxd.cmd get-chrome
+          
+          :: Zbudowanie bindingów (Natives)
+          call prebuild.cmd
+          
+          :: Wygenerowanie plików projektu FastBuild/MSbuild dla klienta
+          call fxd.cmd gen -game five
+          
+          :: Właściwa kompilacja
+          call fxd.cmd build -game five
 
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip setuptools
-          npm install -g yarn
-
-      - name: Setup MSYS2
-        uses: msys2/setup-msys2@v2
-        with:
-          update: true
-          location: C:\msys64
-
-      - name: Remove Adhesive (Anticheat) Component
-        shell: pwsh
-        run: |
-          $componentsFile = "data/client/components.json"
-          if (Test-Path $componentsFile) {
-              $json = Get-Content $componentsFile -Raw | ConvertFrom-Json
-              $filtered = @($json | Where-Object { $_ -ne "adhesive" })
-              $filtered | ConvertTo-Json | Set-Content $componentsFile
-              Write-Host "Removed adhesive from components.json successfully."
-              Get-Content $componentsFile
-          }
-
-      - name: Download Chrome dependencies
-        shell: pwsh
-        run: |
-          .\fxd.ps1 get-chrome
-
-      - name: Run prebuild
-        shell: pwsh
-        run: |
-          .\fxd.ps1 prebuild
-
-      - name: Generate project files
-        shell: pwsh
-        run: |
-          .\fxd.ps1 gen -game five
-
-      - name: Find generated solution file
-        id: find_sln
-        shell: pwsh
-        run: |
-          Write-Host "Searching for .sln files..."
-          $slnFiles = Get-ChildItem -Path . -Recurse -Filter "*.sln" -ErrorAction SilentlyContinue
-          foreach ($f in $slnFiles) {
-            Write-Host "Found: $($f.FullName)"
-          }
-          $sln = $slnFiles | Where-Object { $_.Name -match "CitizenMP|citizen" } | Select-Object -First 1
-          if ($sln) {
-            Write-Host "Using solution: $($sln.FullName)"
-            "SLN_PATH=$($sln.FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          } else {
-            Write-Error "No solution file found! Build generation may have failed."
-            exit 1
-          }
-
-      - name: Restore NuGet packages
-        shell: pwsh
-        run: |
-          $slnPath = "${{ steps.find_sln.outputs.SLN_PATH }}"
-          if (!(Test-Path "nuget.exe")) {
-            Invoke-WebRequest -Uri "https://dist.nuget.org/win-x86-commandline/latest/nuget.exe" -OutFile "nuget.exe"
-          }
-          .\nuget.exe restore $slnPath -NonInteractive
-
-      - name: Build Solution with MSBuild
-        run: |
-          msbuild "${{ steps.find_sln.outputs.SLN_PATH }}" /restore /p:Configuration=Release /p:Platform=x64 /m /v:minimal
-
-      - name: Upload Artifacts
+      - name: Zapisanie gotowego klienta (Artefakty)
         uses: actions/upload-artifact@v4
         with:
-          name: FiveM-Client-NoAnticheat
-          path: code/bin/five/
-          if-no-files-found: warn
+          name: FiveM-Client-Debug
+          path: code/bin/five/debug/
