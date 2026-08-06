@@ -18,14 +18,21 @@ jobs:
     - name: Setup MSBuild
       uses: microsoft/setup-msbuild@v2
 
+    - name: Ensure Premake5 is present
+      shell: powershell
+      run: |
+        if (-not (Test-Path "vendor/bin/premake5.exe")) {
+            Write-Host "Downloading premake5..."
+            New-Item -ItemType Directory -Force -Path "vendor/bin"
+            Invoke-WebRequest -Uri "https://github.com/premake/premake-core/releases/download/v5.0.0-beta2/premake-5.0.0-beta2-windows.zip" -OutFile "premake5.zip"
+            Expand-Archive -Path "premake5.zip" -DestinationPath "vendor/bin" -Force
+            Remove-Item "premake5.zip"
+        }
+
     - name: Generate Visual Studio 2022 Solution
       shell: powershell
       run: |
-        if (Test-Path "vendor/bin/premake5.exe") {
-            .\vendor\bin\premake5.exe vs2022
-        } else {
-            premake5 vs2022
-        }
+        .\vendor\bin\premake5.exe vs2022
 
     - name: Build FiveM Client
       shell: cmd
