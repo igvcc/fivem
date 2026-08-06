@@ -1,61 +1,46 @@
-name: Build FiveM Client
+name: Build Custom FiveM Client
 
 on:
-  workflow_dispatch: # Pozwala ręcznie odpalić kompilację w zakładce "Actions"
   push:
-    branches:
-      - master
-      - main
-    paths-ignore:
-      - '**.md' # Ignoruje zmiany w plikach tekstowych
+    branches: [ main, master ]
+  workflow_dispatch:
 
 jobs:
-  build-client:
-    name: Kompilacja klienta (Windows)
-    runs-on: windows-2022
+  build:
+    runs-on: windows-latest
 
     steps:
-      - name: Konfiguracja Gita dla symlinków
-        # FiveM wymaga symlinków, co jest domyślnie wyłączone w Windowsie
-        run: git config --global core.symlinks true
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        submodules: 'recursive'
 
-      - name: Pobieranie kodu repozytorium (Checkout)
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
-          fetch-depth: 1
+    - name: Setup MSBuild
+      uses: microsoft/setup-msbuild@v2
 
-      - name: Konfiguracja Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
+    - name: Generate Visual Studio 2022 Solution
+      shell: powershell
+      run: |
+        if (Test-Path "vendor/bin/premake5.exe") {
+            .\vendor\bin\premake5.exe vs2022
+        } else {
+            premake5 vs2022
+        }
 
-      - name: Instalacja setuptools (Wymagane przez skrypty)
-        run: pip install setuptools
+    - name: Build FiveM Client
+      shell: cmd
+      run: |
+        msbuild FiveM.sln /p:Configuration=Release /p:Platform=x64 /m /verbosity:minimal
 
-      - name: Konfiguracja Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
+    - name: Package Build Artifacts
+      shell: powershell
+      run: |
+        New-Item -ItemType Directory -Force -Path "dist"
+        Copy-Item -Path "out/build/x64/Release/*" -Destination "dist" -Recurse -Force
+        Compress-Archive -Path "dist/*" -DestinationPath "FiveM-Custom-Client.zip"
 
-      - name: Budowanie projektu (fxd)
-        # Używamy jednego kroku CMD, aby środowisko poprawnie dziedziczyło zmienne systemowe
-        shell: cmd
-        run: |
-          :: Pobranie odpowiedniej wersji Chromium dla FiveM
-          call fxd.cmd get-chrome
-          
-          :: Zbudowanie bindingów (Natives)
-          call prebuild.cmd
-          
-          :: Wygenerowanie plików projektu FastBuild/MSbuild dla klienta
-          call fxd.cmd gen -game five
-          
-          :: Właściwa kompilacja
-          call fxd.cmd build -game five
-
-      - name: Zapisanie gotowego klienta (Artefakty)
-        uses: actions/upload-artifact@v4
-        with:
-          name: FiveM-Client-Debug
-          path: code/bin/five/debug/
+    - name: Upload Build Output Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: FiveM-Custom-Client
+        path: FiveM-Custom-Client.zip
