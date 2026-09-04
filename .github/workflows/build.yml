@@ -1,53 +1,157 @@
-name: Build Custom FiveM Client
+name: Build FiveM Client
 
 on:
-  push:
-    branches: [ main, master ]
   workflow_dispatch:
+    inputs:
+      configuration:
+        description: 'Build Configuration'
+        required: true
+        default: 'Release'
+        type: choice
+        options:
+          - Release
+          - Debug
+  push:
+    branches:
+      - master
+      - main
+    paths-ignore:
+      - '**.md'
 
 jobs:
-  build:
-    runs-on: windows-latest
+  build-client:
+    name: Build FiveM Client (Windows)
+    runs-on: windows-2022
+
+    env:
+      WINDOWS_SDK_VERSION: '10.0.22621.0'
+      BUILD_CONFIG: ${{ github.event.inputs.configuration || 'Release' }}
 
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
-      with:
-        submodules: 'recursive'
+      - name: Free disk space on runner
+        shell: powershell
+        run: |
+          Write-Host "Freeing disk space on runner..."
+          Remove-Item -Recurse -Force "C:\hostedtoolcache\windows\Ruby" -ErrorAction SilentlyContinue
+          Remove-Item -Recurse -Force "C:\hostedtoolcache\windows\Java" -ErrorAction SilentlyContinue
+          Remove-Item -Recurse -Force "$env:ANDROID_HOME" -ErrorAction SilentlyContinue
+          Get-PSDrive
 
-    - name: Setup MSBuild
-      uses: microsoft/setup-msbuild@v2
+      - name: Configure Git for symlinks
+        shell: powershell
+        run: |
+          git config --global core.symlinks true
 
-    - name: Ensure Premake5 is present
-      shell: powershell
-      run: |
-        if (-not (Test-Path "vendor/bin/premake5.exe")) {
-            Write-Host "Downloading premake5..."
-            New-Item -ItemType Directory -Force -Path "vendor/bin"
-            Invoke-WebRequest -Uri "https://github.com/premake/premake-core/releases/download/v5.0.0-beta2/premake-5.0.0-beta2-windows.zip" -OutFile "premake5.zip"
-            Expand-Archive -Path "premake5.zip" -DestinationPath "vendor/bin" -Force
-            Remove-Item "premake5.zip"
-        }
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
 
-    - name: Generate Visual Studio 2022 Solution
-      shell: powershell
-      run: |
-        .\vendor\bin\premake5.exe vs2022
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
 
-    - name: Build FiveM Client
-      shell: cmd
-      run: |
-        msbuild FiveM.sln /p:Configuration=Release /p:Platform=x64 /m /verbosity:minimal
+      - name: Install Python dependencies
+        shell: powershell
+        run: |
+          pip install setuptools Jinja2 MarkupSafe ply six
 
-    - name: Package Build Artifacts
-      shell: powershell
-      run: |
-        New-Item -ItemType Directory -Force -Path "dist"
-        Copy-Item -Path "out/build/x64/Release/*" -Destination "dist" -Recurse -Force
-        Compress-Archive -Path "dist/*" -DestinationPath "FiveM-Custom-Client.zip"
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
 
-    - name: Upload Build Output Artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: FiveM-Custom-Client
-        path: FiveM-Custom-Client.zip
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Prebuild and Generate Solution
+        shell: cmd
+        run: |
+          echo === Downloading CEF ===
+          call fxd.cmd get-chrome
+          
+          echo === Running prebuild scripts ===
+          call prebuild.cmd
+          
+          echo === Generating Visual Studio 2022 Solution ===
+          call fxd.cmd gen -game five
+
+      - name: Build FiveM Solution
+        shell: cmd
+        run: |
+          echo === Building FiveM Client (%BUILD_CONFIG%) ===
+          "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\MSBuild\Current\Bin\MsBuild.exe" code\build\five\CitizenMP.sln /t:build /restore /p:RestorePackagesConfig=true /p:preferredtoolarchitecture=x64 /p:configuration=%BUILD_CONFIG% /p:WindowsTargetPlatformVersion=10.0.22621.0 /m /verbosity:minimal
+
+      - name: Package Build Artifacts
+        shell: powershell
+        run: |
+          $config = $env:BUILD_CONFIG
+          Write-Host "Packaging client for configuration: $config"
+          
+          $binDir = "code/bin/five/$($config.ToLower())"
+          if (-not (Test-Path $binDir)) {
+              $binDir = "code/bin/five/$config"
+          }
+          
+          Write-Host "Source binary directory: $binDir"
+          New-Item -ItemType Directory -Force -Path "dist"
+          
+          # Copy FiveM.exe
+          if (Test-Path "$binDir/FiveM.exe") {
+              Copy-Item "$binDir/FiveM.exe" "dist/FiveM.exe" -Force
+              Write-Host "Successfully located FiveM.exe!"
+          } else {
+              Write-Warning "FiveM.exe was not found in $binDir. Searching code/bin/five..."
+              Get-ChildItem -Path "code/bin/five" -Recurse -Filter "*.exe" | Select-Object FullName
+          }
+          
+          # Copy DLLs, COMs, and subprocess binaries
+          Copy-Item "$binDir/*.dll" "dist/" -Force -ErrorAction SilentlyContinue
+          Copy-Item "$binDir/*.com" "dist/" -Force -ErrorAction SilentlyContinue
+          Copy-Item "$binDir/CitizenFX_SubProcess_*.bin" "dist/" -Force -ErrorAction SilentlyContinue
+          
+          # Copy citizen directory (mono & scripting assemblies)
+          if (Test-Path "$binDir/citizen") {
+              Copy-Item "$binDir/citizen" "dist/citizen" -Recurse -Force
+          }
+          
+          # Copy CEF runtime if present
+          if (Test-Path "vendor/cef/Release") {
+              New-Item -ItemType Directory -Force -Path "dist/bin"
+              Copy-Item "vendor/cef/Release/*.dll" "dist/bin/" -Force -ErrorAction SilentlyContinue
+              Copy-Item "vendor/cef/Release/*.bin" "dist/bin/" -Force -ErrorAction SilentlyContinue
+              Copy-Item "vendor/cef/Resources/icudtl.dat" "dist/bin/" -Force -ErrorAction SilentlyContinue
+              if (Test-Path "vendor/cef/Resources") {
+                  New-Item -ItemType Directory -Force -Path "dist/bin/cef"
+                  Copy-Item "vendor/cef/Resources/*.pak" "dist/bin/cef/" -Force -ErrorAction SilentlyContinue
+                  Copy-Item "vendor/cef/Resources/locales" "dist/bin/cef/locales" -Recurse -Force -ErrorAction SilentlyContinue
+              }
+          }
+          
+          # Copy client and shared data
+          if (Test-Path "data/shared") {
+              Copy-Item "data/shared/*" "dist/" -Recurse -Force -ErrorAction SilentlyContinue
+          }
+          if (Test-Path "data/client") {
+              Copy-Item "data/client/*" "dist/" -Recurse -Force -ErrorAction SilentlyContinue
+          }
+          
+          # Create zip package
+          Compress-Archive -Path "dist/*" -DestinationPath "FiveM-Client-$config.zip" -Force
+          Write-Host "Archive created: FiveM-Client-$config.zip"
+
+      - name: Upload FiveM Client Package
+        uses: actions/upload-artifact@v4
+        with:
+          name: FiveM-Client-${{ env.BUILD_CONFIG }}
+          path: FiveM-Client-*.zip
+          if-no-files-found: error
+
+      - name: Upload FiveM Executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: FiveM-Executable-${{ env.BUILD_CONFIG }}
+          path: dist/FiveM.exe
+          if-no-files-found: warn
