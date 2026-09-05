@@ -1333,6 +1333,11 @@ std::unique_ptr<TenUIBase> UI_InitTen()
 		forceOff = true;
 	}
 
+	if (CfxIsWine())
+	{
+		forceOff = true;
+	}
+
 #ifdef IS_LAUNCHER
 	forceOff = true;
 #endif

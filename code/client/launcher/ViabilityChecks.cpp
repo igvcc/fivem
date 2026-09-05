@@ -176,6 +176,11 @@ static NTSTATUS NTAPI EarlyLdrLoadDllStub(const wchar_t* fileName, uint32_t* fla
 
 void EarlyLdrBlock_Init()
 {
+	if (CfxIsWine())
+	{
+		return;
+	}
+
 	MH_Initialize();
 	MH_CreateHookApi(L"ntdll.dll", "LdrLoadDll", EarlyLdrLoadDllStub, (void**)&g_earlyOrigLoadDll);
 	MH_EnableHook(MH_ALL_HOOKS);

@@ -27,9 +27,17 @@ static BOOL(NTAPI* g_origZwQueryDebugFilterState)(_In_ ULONG ComponentId, _In_ U
 struct HardErrorScope
 {
 	HardErrorScope()
-		: m_target(GetProcAddress(GetModuleHandle(L"ntdll.dll"), "RtlRaiseException")),
-		  m_target2(GetProcAddress(GetModuleHandle(L"ntdll.dll"), "ZwQueryDebugFilterState"))
+		: m_target(nullptr),
+		  m_target2(nullptr)
 	{
+		if (CfxIsWine())
+		{
+			return;
+		}
+
+		m_target = GetProcAddress(GetModuleHandle(L"ntdll.dll"), "RtlRaiseException");
+		m_target2 = GetProcAddress(GetModuleHandle(L"ntdll.dll"), "ZwQueryDebugFilterState");
+
 		ms_curErrScope = this;
 
 		// OSBuildNumber
@@ -57,6 +65,11 @@ struct HardErrorScope
 
 	~HardErrorScope()
 	{
+		if (CfxIsWine())
+		{
+			return;
+		}
+
 		DisableToolHelpScope thScope;
 
 		MH_DisableHook(m_target);
