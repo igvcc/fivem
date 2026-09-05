@@ -204,7 +204,9 @@ pplx::task<tl::expected<fwRefContainer<fx::Resource>, fx::ResourceManagerError>>
 
 				dropCallback();
 				
-				return tl::make_unexpected(packfileResult.error());
+				trace("CachedResourceMounter: packfile for %s could not be opened (%s), skipping packfile mount.\n", resource->GetName().c_str(), packfileResult.error().Get());
+
+				return localResource;
 			}, pplx::task_options(g_schedulerWrap));
 		}
 	}
