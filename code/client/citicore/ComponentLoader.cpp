@@ -188,12 +188,15 @@ void ComponentLoader::InitializeWithString(std::string_view cacheBuf)
 						environmentType = L"Windows on ARM";
 					}
 
-					MessageBoxW(NULL, 
-						va(
-							L"The game is running in insecure mode because %s is not supported by the anti-cheat components at this time.\n"
-							L"Most servers, as well as some authentication features will be unavailable.",
-							environmentType),
-						L"Cfx.re: Insecure mode", MB_OK | MB_ICONWARNING);
+					if (!CfxIsWine())
+					{
+						MessageBoxW(NULL, 
+							va(
+								L"The game is running in insecure mode because %s is not supported by the anti-cheat components at this time.\n"
+								L"Most servers, as well as some authentication features will be unavailable.",
+								environmentType),
+							L"Cfx.re: Insecure mode", MB_OK | MB_ICONWARNING);
+					}
 				}
 
 				AddComponent(new DllGameComponent(va(PLATFORM_LIBRARY_STRING, L"sticky")));
