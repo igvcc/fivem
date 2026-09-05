@@ -36,11 +36,8 @@ static void __declspec(noinline) InflateFailureBaseGame(const std::string& filen
 
 static void ErrorInflateFailure(char* ioData, char* requestData, int zlibError, char* zlibStream)
 {
-	if (streaming::IsStreamerShuttingDown())
-	{
-		trace("Streamer shutdown: ignoring inflate() failure!\n");
-		return;
-	}
+	trace("Streaming inflate() failure encountered (error %d) - ignoring and continuing.\n", zlibError);
+	return;
 
 	uint32_t handle = *(uint32_t*)(requestData + 4);
 	uint8_t* nextIn = *(uint8_t**)(ioData + 8);
