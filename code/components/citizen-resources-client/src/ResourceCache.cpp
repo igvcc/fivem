@@ -268,7 +268,7 @@ std::optional<ResourceCache::Entry> ResourceCache::GetEntryFor(const std::string
 
 std::optional<ResourceCache::Entry> ResourceCache::GetEntryFor(const ResourceCacheEntryList::Entry& entry)
 {
-	if (entry.referenceHash.empty())
+	if (!entry.remoteUrl.empty())
 	{
 		// attempt a database get
 		std::string key = "cache:v1:url:" + entry.remoteUrl;
@@ -280,18 +280,12 @@ std::optional<ResourceCache::Entry> ResourceCache::GetEntryFor(const ResourceCac
 		{
 			return std::optional<Entry>(Entry(value));
 		}
-
-		if (!status.IsNotFound())
-		{
-#if _DEBUG
-			FatalError("Failed to fetch ResourceCache entry: %s", status.ToString());
-#else
-			trace("Failed to fetch ResourceCache entry: %s\n", status.ToString());
-#endif
-		}
-
-		return std::optional<Entry>();
 	}
 
-	return GetEntryFor(entry.referenceHash);
+	if (!entry.referenceHash.empty())
+	{
+		return GetEntryFor(entry.referenceHash);
+	}
+
+	return std::optional<Entry>();
 }
