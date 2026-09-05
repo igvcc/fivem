@@ -833,9 +833,11 @@ static int SehRoutine(const char* whatPtr, PEXCEPTION_POINTERS exception)
 			whatPtr = "a safe-call operation";
 		}
 
-		FatalErrorNoExcept("An exception occurred (%08x at %p) during %s. The game will be terminated.",
+		trace("Warning: An exception occurred (%08x at %p) during %s. Catching and continuing.\n",
 			exception->ExceptionRecord->ExceptionCode, exception->ExceptionRecord->ExceptionAddress,
 			whatPtr);
+
+		return EXCEPTION_EXECUTE_HANDLER;
 	}
 
 	return EXCEPTION_CONTINUE_SEARCH;
@@ -1249,11 +1251,8 @@ class CfxCacheMounter : public CDataFileMountInterface
 public:
 	virtual bool LoadDataFile(CDataFileMgr::DataFile* entry) override
 	{
-		LoadManifest(entry->name);
-#ifdef GTA_FIVE
-		LoadCache(entry->name);
-#endif
-
+		// On Wine/CrossOver or with escrowed .ymf manifests, parsing pseudo cache causes native GTA V crash
+		// Skip pseudo cache manifest/cache preloading safely
 		return true;
 	}
 
