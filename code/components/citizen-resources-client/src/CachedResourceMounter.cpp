@@ -67,7 +67,7 @@ CachedResourceMounter::CachedResourceMounter(fx::ResourceManager* manager, const
 
 bool CachedResourceMounter::HandlesScheme(const std::string& scheme)
 {
-	return (scheme == "global");
+	return (scheme == "global" || scheme == "ci");
 }
 
 fwRefContainer<fx::Resource> CachedResourceMounter::InitializeLoad(const std::string& uri, skyr::url* parsedUri)

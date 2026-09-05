@@ -6,6 +6,7 @@
  */
 
 #include "StdInc.h"
+#include "LaunchMode.h"
 
 #include <MinHook.h>
 #include "Hooking.Aux.h"

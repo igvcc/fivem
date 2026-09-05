@@ -6,6 +6,7 @@
  */
 
 #include "StdInc.h"
+#include <../citicore/LaunchMode.h>
 #include <CommCtrl.h>
 #include <ctime>
 #include <chrono>

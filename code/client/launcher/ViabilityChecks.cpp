@@ -1,4 +1,5 @@
 #include "StdInc.h"
+#include <../citicore/LaunchMode.h>
 
 #include <wrl.h>
 

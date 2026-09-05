@@ -7,6 +7,7 @@
 
 #include "StdInc.h"
 #include "DllGameComponent.h"
+#include "LaunchMode.h"
 
 #include <Error.h>
 
